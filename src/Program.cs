@@ -47,8 +47,10 @@ namespace BatteryLevel
                     all = BatteryReader.ReadAll();
                 }
                 Aliases.Apply(all);
+                try { Console.OutputEncoding = Encoding.UTF8; } catch { }
                 foreach (var d in all)
-                    Console.WriteLine("{0}\t{1}%\t{2}\t{3}{4}", d.Name, d.Level, d.Kind, d.Connection, d.Charging ? "\tcharging" : "");
+                    Console.WriteLine("{0}\t{1}\t{2}\t{3}{4}", d.Name, d.HasBattery ? d.Level + "%" : "-",
+                        d.Kind, d.Connection, d.Charging ? "\tcharging" : "");
                 if (argLine.Contains("--hid"))
                     foreach (var h in Hid.EnumerateUsb())
                         Console.WriteLine("HID {0:X4}:{1:X4} {2:X4}:{3:X4} in={4} out={5} feat={6} {7}",
@@ -184,6 +186,7 @@ namespace BatteryLevel
             var sb = new StringBuilder();
             foreach (var d in last)
             {
+                if (!d.HasBattery) continue;   // 读不到电量的设备不参与托盘图标与提示
                 if (min < 0 || d.Level < min) min = d.Level;
                 var line = d.Name + " " + d.Level + "%";
                 if (sb.Length + line.Length + 1 > 63) break;   // NotifyIcon.Text 上限 63 字符
@@ -206,7 +209,7 @@ namespace BatteryLevel
         {
             foreach (var d in last)
             {
-                if (d.IsSystem || d.Charging) continue;   // 本机电池由系统自行提醒；充电中不提醒
+                if (d.IsSystem || d.Charging || !d.HasBattery) continue;   // 本机电池由系统自行提醒；充电中不提醒
                 if (d.Level <= Theme.LowThreshold)
                 {
                     if (lowNotified.Add(d.Id))

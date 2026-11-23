@@ -119,6 +119,7 @@ namespace BatteryLevel
             }
             var d = new DeviceBattery();
             d.Id = "lg:" + key;
+            d.Container = container;
             d.Name = info.Name;
             d.Kind = info.Kind;
             d.Level = level;

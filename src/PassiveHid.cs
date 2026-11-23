@@ -61,6 +61,7 @@ namespace BatteryLevel
                     if (!done.Add(l.Info.Container)) continue;
                     var d = new DeviceBattery();
                     d.Id = "pv:" + l.Info.Container;
+                    d.Container = l.Info.Container;
                     d.Kind = Hid.KindFromCollections(all, l.Info.Container, null);
                     d.Name = NameFor(l.Info, d.Kind);
                     d.Level = l.Level;

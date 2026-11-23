@@ -22,6 +22,7 @@ namespace BatteryLevel
 
         // 逻辑尺寸（96 DPI）
         const int LogicalWidth = 340, Pad = 16, HeaderH = 56, CardH = 74, Gap = 8, EmptyH = 140;
+        const int CompactH = 54, SectionH = 30;   // 无电量设备的紧凑卡片、分区标题
 
         readonly float scale;
         readonly string iconFontName;
@@ -168,9 +169,10 @@ namespace BatteryLevel
 
         void PlaceNearTray()
         {
-            int count = Math.Max(devices.Count, 0);
-            int body = count == 0 ? S(EmptyH) : count * S(CardH) + (count - 1) * S(Gap);
             int w = S(LogicalWidth);
+            Rectangle section;
+            int body = devices.Count == 0 ? S(EmptyH)
+                : LayoutCards(0, w - 2 * S(Pad), 0, new List<Rectangle>(), out section);
             int h = S(Pad) + S(HeaderH) + body + S(Pad);
 
             var screen = Screen.FromPoint(Cursor.Position);
@@ -366,14 +368,76 @@ namespace BatteryLevel
                 return;
             }
 
-            foreach (var d in devices)
+            var rects = new List<Rectangle>();
+            Rectangle section;
+            LayoutCards(area.X, area.Width, y, rects, out section);
+            if (!section.IsEmpty)
+                TextRenderer.DrawText(g, "未提供电量的设备", fSub,
+                    new Rectangle(section.X + S(2), section.Y, section.Width, section.Height - S(6)), theme.SubText,
+                    TextFormatFlags.Bottom | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            for (int i = 0; i < rects.Count; i++)
             {
-                var r = new Rectangle(area.X, y, area.Width, S(CardH));
+                var r = rects[i];
                 if (r.Bottom > ClientSize.Height - S(4)) break;
                 cardRects.Add(r);
-                DrawCard(g, r, d);
-                y += S(CardH) + S(Gap);
+                if (devices[i].HasBattery) DrawCard(g, r, devices[i]);
+                else DrawCompact(g, r, devices[i]);
             }
+        }
+
+        /// <summary>
+        /// 计算每张卡片的位置（与 devices 顺序一一对应），返回内容底部 y。
+        /// 有电量的设备在前；读不到电量的设备排在“未提供电量的设备”分区里。
+        /// </summary>
+        int LayoutCards(int left, int width, int top, List<Rectangle> rects, out Rectangle section)
+        {
+            section = Rectangle.Empty;
+            int y = top;
+            bool first = true, sectionDone = false;
+            foreach (var d in devices)
+            {
+                if (!d.HasBattery && !sectionDone)
+                {
+                    sectionDone = true;
+                    if (!first) y += S(6);
+                    section = new Rectangle(left, y, width, S(SectionH));
+                    y += S(SectionH);
+                    first = true;
+                }
+                if (!first) y += S(Gap);
+                int h = d.HasBattery ? S(CardH) : S(CompactH);
+                rects.Add(new Rectangle(left, y, width, h));
+                y += h;
+                first = false;
+            }
+            return y - top;
+        }
+
+        void DrawCompact(Graphics g, Rectangle r, DeviceBattery d)
+        {
+            FillCard(g, r);
+            Color kc = KindColor(d.Kind);
+            int dia = S(32);
+            var ic = new Rectangle(r.X + S(14), r.Y + (r.Height - dia) / 2, dia, dia);
+            using (var b = new SolidBrush(Theme.Blend(kc, theme.Card, theme.Dark ? 0.24f : 0.13f)))
+                g.FillEllipse(b, ic);
+            TextRenderer.DrawText(g, Glyph(d.Kind), fGlyphSmall, ic, kc,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            int tx = ic.Right + S(12);
+            int right = r.Right - S(16);
+            var dash = TextRenderer.MeasureText(g, "—", fName, Size.Empty, TextFormatFlags.NoPadding);
+            int dashX = right - dash.Width;
+            TextRenderer.DrawText(g, "—", fName, new Point(dashX, r.Y + (r.Height - dash.Height) / 2), theme.SubText, TextFormatFlags.NoPadding);
+
+            int w = Math.Max(S(40), dashX - tx - S(10));
+            var nameRect = new Rectangle(tx, r.Y + S(8), w, S(21));
+            nameRects.Add(nameRect);
+            if (d != editing)
+                TextRenderer.DrawText(g, d.Name, fName, nameRect, theme.Text,
+                    TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+            TextRenderer.DrawText(g, KindLabel(d), fKind, new Rectangle(tx, r.Y + S(30), w, S(18)), theme.SubText,
+                TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
         }
 
         void FillCard(Graphics g, Rectangle r)
@@ -391,13 +455,14 @@ namespace BatteryLevel
         {
             FillCard(g, r);
             Color lc = Theme.LevelColor(d.Level);
+            Color kc = KindColor(d.Kind);
 
-            // 图标圆
+            // 图标圆：颜色区分设备类型
             int dia = S(42);
             var ic = new Rectangle(r.X + S(14), r.Y + (r.Height - dia) / 2, dia, dia);
-            using (var b = new SolidBrush(Theme.Blend(lc, theme.Card, theme.Dark ? 0.22f : 0.13f)))
+            using (var b = new SolidBrush(Theme.Blend(kc, theme.Card, theme.Dark ? 0.24f : 0.13f)))
                 g.FillEllipse(b, ic);
-            TextRenderer.DrawText(g, Glyph(d.Kind), fGlyph, ic, lc,
+            TextRenderer.DrawText(g, Glyph(d.Kind), fGlyph, ic, kc,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
             int tx = ic.Right + S(14);
@@ -445,10 +510,10 @@ namespace BatteryLevel
             var gl = new Rectangle(r.X, r.Y + S(20), r.Width, S(40));
             TextRenderer.DrawText(g, "", fGlyphLarge, gl, theme.SubText,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            string t1 = scanning ? "正在扫描…" : "暂无可读取电量的设备";
+            string t1 = scanning ? "正在扫描…" : "未发现外接设备";
             TextRenderer.DrawText(g, t1, fName, new Rectangle(r.X, r.Y + S(70), r.Width, S(22)), theme.Text,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
-            TextRenderer.DrawText(g, "支持向 Windows 上报电量的蓝牙设备", fKind, new Rectangle(r.X, r.Y + S(96), r.Width, S(18)), theme.SubText,
+            TextRenderer.DrawText(g, "连接鼠标、键盘或耳机后会自动出现在这里", fKind, new Rectangle(r.X, r.Y + S(96), r.Width, S(18)), theme.SubText,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
         }
 
@@ -465,6 +530,23 @@ namespace BatteryLevel
                 case DeviceKind.Pen: return "";
                 case DeviceKind.Laptop: return "";
                 default: return "";
+            }
+        }
+
+        /// <summary>设备类型的标识色（图标用），刻意避开电量用的绿/黄/红，避免混淆。</summary>
+        static Color KindColor(DeviceKind k)
+        {
+            switch (k)
+            {
+                case DeviceKind.Mouse: return Color.FromArgb(0x3B, 0x82, 0xF6);     // 蓝
+                case DeviceKind.Keyboard: return Color.FromArgb(0x8B, 0x5C, 0xF6);  // 紫
+                case DeviceKind.Headset: return Color.FromArgb(0xEC, 0x48, 0x99);   // 粉
+                case DeviceKind.Speaker: return Color.FromArgb(0x06, 0xB6, 0xD4);   // 青
+                case DeviceKind.Gamepad: return Color.FromArgb(0x63, 0x66, 0xF1);   // 靛
+                case DeviceKind.Phone: return Color.FromArgb(0x0E, 0xA5, 0xE9);     // 天蓝
+                case DeviceKind.Pen: return Color.FromArgb(0xD9, 0x46, 0xEF);       // 品红
+                case DeviceKind.Laptop: return Color.FromArgb(0x14, 0xB8, 0xA6);    // 蓝绿
+                default: return Color.FromArgb(0x64, 0x74, 0x8B);                   // 石板灰
             }
         }
 

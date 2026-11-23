@@ -52,6 +52,7 @@ namespace BatteryLevel
 
                         var d = new DeviceBattery();
                         d.Id = "rz:" + h.Container;
+                        d.Container = h.Container;
                         d.Name = name;
                         d.Kind = Hid.KindFromCollections(all, h.Container, name);
                         d.Level = Math.Min(100, level);

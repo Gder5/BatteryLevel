@@ -23,6 +23,7 @@ namespace BatteryLevel
                 var name = Hid.GetProduct(h.Path) ?? "USB 设备";
                 var d = new DeviceBattery();
                 d.Id = "hid:" + h.Container;
+                d.Container = h.Container;
                 d.Name = name;
                 d.Kind = Hid.KindFromCollections(all, h.Container, name);
                 d.Level = level;

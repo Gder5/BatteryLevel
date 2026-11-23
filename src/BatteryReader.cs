@@ -13,7 +13,9 @@ namespace BatteryLevel
         public string Name;          // 显示名（可能是用户设置的别名）
         public string DefaultName;   // 设备自身报告的名称
         public DeviceKind Kind;
-        public int Level;          // 0-100
+        public Guid Container;     // Windows 设备容器 ID：同一物理设备/接收器的所有节点共享
+        public int Level;          // 0-100；-1 表示已发现但读不到电量
+        public bool HasBattery { get { return Level >= 0; } }
         public bool Charging;
         public bool IsSystem;      // 本机电池
         public string Connection;  // 蓝牙 / 2.4G 接收器 / USB / 有线
@@ -54,8 +56,12 @@ namespace BatteryLevel
         public static List<DeviceBattery> ReadAll()
         {
             var result = new List<DeviceBattery>();
-            try { result.AddRange(ReadBluetooth()); } catch { }
-            try { ReadUsbHid(result); } catch { }
+            var bt = new Dictionary<Guid, Discovery.BtDevice>();
+            List<HidInfo> hids = null;
+            try { result.AddRange(ReadBluetooth(bt)); } catch { }
+            try { hids = Hid.EnumerateUsb(); ReadUsbHid(hids, result); } catch { }
+            // 最后补上读不到电量的鼠标/键盘，至少让用户知道它们已被识别
+            try { Discovery.Read(hids ?? new List<HidInfo>(), bt, result); } catch { }
             result.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
             try
             {
@@ -66,9 +72,8 @@ namespace BatteryLevel
             return result;
         }
 
-        static void ReadUsbHid(List<DeviceBattery> output)
+        static void ReadUsbHid(List<HidInfo> hids, List<DeviceBattery> output)
         {
-            var hids = Hid.EnumerateUsb();
             var vendorHandled = new HashSet<Guid>();
             foreach (var h in hids)
                 if (h.Vid == 0x046D || h.Vid == 0x1532) vendorHandled.Add(h.Container);
@@ -99,7 +104,7 @@ namespace BatteryLevel
 
         // ───────────────────────────── 蓝牙 ─────────────────────────────
 
-        static IEnumerable<DeviceBattery> ReadBluetooth()
+        static IEnumerable<DeviceBattery> ReadBluetooth(Dictionary<Guid, Discovery.BtDevice> btAll)
         {
             var nodes = new List<Node>();
             foreach (var en in new[] { "BTHENUM", "BTHLE", "BTHLEDEVICE" })
@@ -132,8 +137,6 @@ namespace BatteryLevel
                     if (category == null && !string.IsNullOrEmpty(n.Category)) category = n.Category;
                     if (cod == 0 && n.ClassOfDevice != 0) cod = n.ClassOfDevice;
                 }
-                if (battery < 0 || battery > 100) continue;
-                if (anyDisconnected && !anyConnected) continue;   // 已配对但未连接，电量是旧值
 
                 string name = dev != null ? dev.Name : null;
                 if (string.IsNullOrEmpty(name))
@@ -141,8 +144,19 @@ namespace BatteryLevel
                         if (!string.IsNullOrEmpty(n.Name)) { name = CleanName(n.Name); break; }
                 if (string.IsNullOrEmpty(name)) name = "蓝牙设备";
 
+                // 记录所有蓝牙设备（含无电量的），供自动发现使用
+                var info = new Discovery.BtDevice();
+                info.Name = name;
+                info.Connected = anyConnected || !anyDisconnected;
+                info.Kind = GuessKind(category, cod, name);
+                btAll[kv.Key] = info;
+
+                if (battery < 0 || battery > 100) continue;
+                if (anyDisconnected && !anyConnected) continue;   // 已配对但未连接，电量是旧值
+
                 var d = new DeviceBattery();
                 d.Id = kv.Key.ToString();
+                d.Container = kv.Key;
                 d.Name = name;
                 d.Level = battery;
                 d.Connection = "蓝牙";
