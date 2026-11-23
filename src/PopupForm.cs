@@ -26,13 +26,14 @@ namespace BatteryLevel
 
         readonly float scale;
         readonly string iconFontName;
-        Font fTitle, fSub, fName, fKind, fPercent, fGlyph, fGlyphSmall, fGlyphLarge;
+        Font fTitle, fSub, fName, fKind, fPercent, fGlyph, fGlyphSmall, fGlyphLarge, fGlyphTiny;
         Theme theme;
         List<DeviceBattery> devices = new List<DeviceBattery>();
         DateTime updated = DateTime.MinValue;
         bool scanning = true;
-        Rectangle refreshRect;
-        bool hoverRefresh;
+        Rectangle refreshRect, rescanRect;
+        bool hoverRefresh, hoverRescan, rescanning;
+        ToolTip tip;
 
         // 卡片命中测试与重命名
         readonly List<Rectangle> cardRects = new List<Rectangle>();
@@ -46,6 +47,8 @@ namespace BatteryLevel
         public DateTime LastHidden = DateTime.MinValue;
         public event EventHandler DeviceRenamed;
         public event EventHandler RefreshRequested;
+        public event EventHandler RescanRequested;
+        public event EventHandler DeviceRemoved;
         public event EventHandler DevicesChanged;
         public event EventHandler ShowRequested;
 
@@ -72,6 +75,7 @@ namespace BatteryLevel
             fGlyph = new Font(iconFontName, 14f);
             fGlyphSmall = new Font(iconFontName, 10.5f);
             fGlyphLarge = new Font(iconFontName, 22f);
+            fGlyphTiny = new Font(iconFontName, 8.5f);
 
             ApplyTheme();
         }
@@ -123,9 +127,10 @@ namespace BatteryLevel
             Invalidate();
         }
 
-        public void SetScanning()
+        public void SetScanning(bool rescan)
         {
             scanning = true;
+            rescanning = rescan;
             Invalidate();
         }
 
@@ -134,6 +139,13 @@ namespace BatteryLevel
             devices = list;
             updated = DateTime.Now;
             scanning = false;
+            rescanning = false;
+            Relayout();
+        }
+
+        /// <summary>设备数量变化后重新计算窗口大小。</summary>
+        public void Relayout()
+        {
             if (Visible) PlaceNearTray(); else Invalidate();
         }
 
@@ -214,20 +226,33 @@ namespace BatteryLevel
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            bool h = refreshRect.Contains(e.Location);
-            if (h != hoverRefresh) { hoverRefresh = h; Cursor = h ? Cursors.Hand : Cursors.Default; Invalidate(refreshRect); }
+            SetHover(refreshRect.Contains(e.Location), rescanRect.Contains(e.Location));
             base.OnMouseMove(e);
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
-            if (hoverRefresh) { hoverRefresh = false; Cursor = Cursors.Default; Invalidate(refreshRect); }
+            SetHover(false, false);
             base.OnMouseLeave(e);
+        }
+
+        void SetHover(bool refresh, bool rescan)
+        {
+            if (refresh == hoverRefresh && rescan == hoverRescan) return;
+            hoverRefresh = refresh; hoverRescan = rescan;
+            Cursor = refresh || rescan ? Cursors.Hand : Cursors.Default;
+            if (tip == null) tip = new ToolTip();
+            tip.Hide(this);
+            if (refresh) tip.Show("刷新电量 (F5)", this, refreshRect.Left - S(30), refreshRect.Bottom + S(4), 2500);
+            else if (rescan) tip.Show("重新查找所有设备，已删除的设备也会恢复显示", this, rescanRect.Left, rescanRect.Bottom + S(4), 3500);
+            Invalidate(refreshRect);
+            Invalidate(rescanRect);
         }
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left && refreshRect.Contains(e.Location)) Raise(RefreshRequested);
+            else if (e.Button == MouseButtons.Left && rescanRect.Contains(e.Location)) Raise(RescanRequested);
             else if (e.Button == MouseButtons.Left && editor != null) EndRename(true);
             else if (e.Button == MouseButtons.Right)
             {
@@ -263,14 +288,24 @@ namespace BatteryLevel
                 miReset = new ToolStripMenuItem("恢复默认名称", null, delegate
                 {
                     if (menuDevice == null) return;
-                    Aliases.Remove(menuDevice.Id);
+                    Aliases.RemoveFor(menuDevice);
                     Raise(DeviceRenamed);
                 });
+                var miDelete = new ToolStripMenuItem("删除设备", null, delegate
+                {
+                    if (menuDevice == null) return;
+                    EndRename(false);
+                    HiddenDevices.Hide(menuDevice);
+                    Raise(DeviceRemoved);
+                });
+                miDelete.ToolTipText = "从列表中移除；点“重新获取”可恢复";
                 cardMenu.Items.Add(miRename);
                 cardMenu.Items.Add(miReset);
+                cardMenu.Items.Add(new ToolStripSeparator());
+                cardMenu.Items.Add(miDelete);
             }
             menuDevice = devices[i];
-            miReset.Enabled = !string.IsNullOrEmpty(Aliases.Get(menuDevice.Id));
+            miReset.Enabled = menuDevice.Name != menuDevice.DefaultName;
             miReset.ToolTipText = menuDevice.DefaultName;
             cardMenu.Show(this, p);
         }
@@ -310,7 +345,7 @@ namespace BatteryLevel
             {
                 var text = box.Text.Trim();
                 // 输入为空或与默认名相同，即视为清除别名
-                if (text.Length == 0 || text == d.DefaultName) Aliases.Remove(d.Id);
+                if (text.Length == 0 || text == d.DefaultName) Aliases.RemoveFor(d);
                 else if (text != d.Name) Aliases.Set(d.Id, text);
             }
             Controls.Remove(box);
@@ -342,8 +377,30 @@ namespace BatteryLevel
 
             // 标题区
             TextRenderer.DrawText(g, "设备电量", fTitle, new Point(px - S(1), px), theme.Text, TextFormatFlags.NoPadding);
+            var titleSize = TextRenderer.MeasureText(g, "设备电量", fTitle, Size.Empty, TextFormatFlags.NoPadding);
+
+            // “重新获取”按钮：紧跟标题右侧的胶囊按钮
+            const string rescanText = "重新获取";
+            var rtSize = TextRenderer.MeasureText(g, rescanText, fSub, Size.Empty, TextFormatFlags.NoPadding);
+            int pillH = S(24), glyphW = S(16);
+            rescanRect = new Rectangle(px + titleSize.Width + S(10), px + (titleSize.Height - pillH) / 2,
+                S(10) + glyphW + S(4) + rtSize.Width + S(11), pillH);
+            using (var pp = Theme.RoundRect(new RectangleF(rescanRect.X + 0.5f, rescanRect.Y + 0.5f, rescanRect.Width - 1, rescanRect.Height - 1), pillH / 2f))
+            {
+                using (var pb = new SolidBrush(hoverRescan ? theme.Hover : theme.Card)) g.FillPath(pb, pp);
+                using (var pn = new Pen(theme.CardBorder, 1f)) g.DrawPath(pn, pp);
+            }
+            Color rc = rescanning ? theme.SubText : theme.Text;
+            TextRenderer.DrawText(g, "", fGlyphTiny,
+                new Rectangle(rescanRect.X + S(10), rescanRect.Y, glyphW, rescanRect.Height), rc,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, rescanText, fSub,
+                new Rectangle(rescanRect.X + S(10) + glyphW + S(4), rescanRect.Y, rtSize.Width + S(2), rescanRect.Height), rc,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
             string sub;
-            if (scanning && updated == DateTime.MinValue) sub = "正在扫描设备…";
+            if (rescanning) sub = "正在重新获取设备…";
+            else if (scanning && updated == DateTime.MinValue) sub = "正在扫描设备…";
             else if (scanning) sub = "正在刷新…";
             else sub = (devices.Count == 0 ? "未发现设备" : devices.Count + " 台设备") + " · " + updated.ToString("HH:mm") + " 更新";
             TextRenderer.DrawText(g, sub, fSub, new Point(px, px + S(26)), theme.SubText, TextFormatFlags.NoPadding);

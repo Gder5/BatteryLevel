@@ -17,6 +17,8 @@ namespace BatteryLevel
         static readonly byte[] TransactionIds = { 0x1F, 0xFF, 0x3F };
         static readonly Dictionary<Guid, byte> knownTid = new Dictionary<Guid, byte>();
 
+        public static void ClearCache() { lock (knownTid) knownTid.Clear(); }
+
         public static void Read(List<HidInfo> all, List<DeviceBattery> output)
         {
             var done = new HashSet<Guid>();

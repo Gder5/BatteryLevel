@@ -34,6 +34,16 @@ namespace BatteryLevel
 
         public static void Remove(string id) { Set(id, null); }
 
+        /// <summary>删除设备的别名，包括按容器 ID 匹配到的（同一设备在其他识别方式下保存的）。</summary>
+        public static void RemoveFor(DeviceBattery d)
+        {
+            Remove(d.Id);
+            if (d.Container == Guid.Empty) return;
+            var suffix = ":" + d.Container;
+            foreach (var key in ReadAll().Keys)
+                if (key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) Remove(key);
+        }
+
         /// <summary>套用别名，并按名称排序（本机电池固定在第一行）。</summary>
         public static void Apply(List<DeviceBattery> list)
         {
@@ -66,7 +76,7 @@ namespace BatteryLevel
             return null;
         }
 
-        static Dictionary<string, string> ReadAll()
+        internal static Dictionary<string, string> ReadAll()
         {
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             try
@@ -83,6 +93,59 @@ namespace BatteryLevel
             }
             catch { }
             return map;
+        }
+    }
+}
+
+namespace BatteryLevel
+{
+    /// <summary>
+    /// 用户从列表中删除的设备，保存在 HKCU\Software\BatteryLevel\Hidden。
+    /// 删除只是不再显示，点“重新获取”会清空此列表，让所有设备重新出现。
+    /// </summary>
+    static class HiddenDevices
+    {
+        const string KeyPath = @"Software\BatteryLevel\Hidden";
+
+        /// <summary>
+        /// 按物理设备（容器 ID）记录，这样同一设备换了识别方式（如先被自动发现、后上报电量）也仍保持隐藏。
+        /// 罗技接收器下可挂多台设备、共享同一容器，因此按单台设备 ID 记录。
+        /// </summary>
+        static string KeyOf(DeviceBattery d)
+        {
+            if (d.Id.StartsWith("lg:") || d.Container == Guid.Empty) return d.Id;
+            return "c:" + d.Container;
+        }
+
+        public static void Hide(DeviceBattery d)
+        {
+            try
+            {
+                using (var k = Registry.CurrentUser.CreateSubKey(KeyPath))
+                    k.SetValue(KeyOf(d), d.Name ?? "");
+            }
+            catch { }
+        }
+
+        public static void Clear()
+        {
+            try { Registry.CurrentUser.DeleteSubKeyTree(KeyPath, false); } catch { }
+        }
+
+        /// <summary>从列表中移除已删除的设备。</summary>
+        public static void Filter(List<DeviceBattery> list)
+        {
+            HashSet<string> hidden;
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(KeyPath))
+                {
+                    if (k == null) return;
+                    hidden = new HashSet<string>(k.GetValueNames(), StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch { return; }
+            if (hidden.Count > 0) list.RemoveAll(d => hidden.Contains(KeyOf(d)));
         }
     }
 }

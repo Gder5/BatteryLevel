@@ -90,7 +90,7 @@ namespace BatteryLevel
         readonly HashSet<string> lowNotified = new HashSet<string>();
         List<DeviceBattery> last = new List<DeviceBattery>();
         Icon currentIcon;
-        bool refreshing, pending, showOnFirst;
+        bool refreshing, pending, rescanPending, showOnFirst;
 
         public TrayApp(bool showPanel)
         {
@@ -106,10 +106,18 @@ namespace BatteryLevel
                 popup.Invalidate();
                 UpdateTray();
             };
+            popup.DeviceRemoved += delegate
+            {
+                HiddenDevices.Filter(last);
+                popup.Relayout();       // 设备变少，面板随之缩短
+                UpdateTray();
+            };
+            popup.RescanRequested += delegate { Refresh(true); };
 
             var menu = new ContextMenuStrip();
             menu.Items.Add("打开面板", null, delegate { ShowPanel(); });
             menu.Items.Add("立即刷新", null, delegate { Refresh(); });
+            menu.Items.Add("重新获取设备", null, delegate { Refresh(true); });
             autoStartItem = new ToolStripMenuItem("开机自启动", null, delegate { ToggleAutoStart(); });
             autoStartItem.Checked = IsAutoStart();
             menu.Items.Add(autoStartItem);
@@ -153,15 +161,25 @@ namespace BatteryLevel
             Refresh();
         }
 
-        void Refresh()
+        void Refresh() { Refresh(false); }
+
+        /// <summary>rescan=true：重新获取设备——恢复已删除的设备并清空识别缓存，再完整扫描一次。</summary>
+        void Refresh(bool rescan)
         {
+            if (rescan) { HiddenDevices.Clear(); rescanPending = true; }
             if (refreshing) { pending = true; return; }
             refreshing = true;
-            popup.SetScanning();
+            bool reset = rescanPending;
+            rescanPending = false;
+            popup.SetScanning(reset);
             ThreadPool.QueueUserWorkItem(delegate
             {
                 List<DeviceBattery> list;
-                try { list = BatteryReader.ReadAll(); }
+                try
+                {
+                    if (reset) BatteryReader.ResetCaches();
+                    list = BatteryReader.ReadAll();
+                }
                 catch { list = new List<DeviceBattery>(); }
                 try { popup.BeginInvoke(new Action(delegate { OnResult(list); })); } catch { }
             });
@@ -170,6 +188,7 @@ namespace BatteryLevel
         void OnResult(List<DeviceBattery> list)
         {
             refreshing = false;
+            HiddenDevices.Filter(list);
             Aliases.Apply(list);
             last = list;
             popup.SetDevices(list);

@@ -53,6 +53,13 @@ namespace BatteryLevel
             public bool IsDeviceNode;    // BTHENUM\DEV_xxx 或 BTHLE\DEV_xxx
         }
 
+        /// <summary>重新获取设备：清空各模块的识别缓存（被动监听的实时数据保留）。</summary>
+        public static void ResetCaches()
+        {
+            Logitech.ClearCache();
+            Razer.ClearCache();
+        }
+
         public static List<DeviceBattery> ReadAll()
         {
             var result = new List<DeviceBattery>();

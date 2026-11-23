@@ -30,6 +30,9 @@ namespace BatteryLevel
         // 缓存每个设备的特性索引与名称，之后每次刷新只需一条电量查询
         static readonly Dictionary<string, Info> cache = new Dictionary<string, Info>();
 
+        /// <summary>清空已识别设备的缓存，下次读取时重新查询名称、类型与特性。</summary>
+        public static void ClearCache() { lock (cache) cache.Clear(); }
+
         /// <summary>HID++ 端口：短报告(0x10, 7 字节)与长报告(0x11, 20 字节)在 Windows 下是两个集合，应答可能出现在任意一个上。</summary>
         sealed class Port : IDisposable
         {
