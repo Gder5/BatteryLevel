@@ -11,7 +11,7 @@
 
 ## 使用
 
-1. 运行 `dist\BatteryLevel.exe`，右下角会弹出面板。
+1. 运行仓库根目录的 `BatteryLevel.exe`，右下角会弹出面板。
 2. 之后**单击托盘图标**打开面板，点击面板以外的地方或按 `Esc` 关闭，按 `F5` 或点 ↻ 刷新。
 3. **右键托盘图标**：打开面板 / 立即刷新 / 开机自启动 / 退出。
 4. **重命名设备**：双击设备卡片，或右键卡片选“重命名…”，输入名称后回车保存（Esc 取消）。清空名称或右键选“恢复默认名称”，就会还原成设备自身报告的名称。别名保存在注册表 `HKCU\Software\BatteryLevel\Aliases`。
@@ -28,10 +28,12 @@
 build.bat
 ```
 
-产物输出到 `dist\BatteryLevel.exe`。诊断用的命令行输出：
+产物输出到仓库根目录的 `BatteryLevel.exe`。它会随源码一起提交，克隆后可以直接运行；修改代码后请重新构建，并把 exe 一起提交。如果程序正在运行，构建脚本会先把它关闭再覆盖。
+
+诊断用的命令行输出：
 
 ```bash
-dist\BatteryLevel.exe --dump
+BatteryLevel.exe --dump
 ```
 
 ## 能读到哪些设备
@@ -54,7 +56,7 @@ dist\BatteryLevel.exe --dump
 遇到不认识的接收器，可以先抓一次数据：
 
 ```bash
-dist\BatteryLevel.exe --sniff
+BatteryLevel.exe --sniff
 ```
 
 工具会只读监听所有厂商自定义通道 60 秒，结果保存为 exe 同目录下的 `sniff-时间.txt`。抓取期间打开官方驱动，记下它显示的电量，然后在数据里找对应的字节：
@@ -63,11 +65,12 @@ dist\BatteryLevel.exe --sniff
 
 对罗技和雷蛇设备，工具只发送**查询指令**（读取特性索引、电量、名称、充电状态），不会修改设备的任何设置，和 G HUB、Logi Options+、Synapse 同时运行也没有冲突。协议细节参考了开源项目 [Solaar](https://github.com/pwr-Solaar/Solaar) 和 [openrazer](https://github.com/openrazer/openrazer)。
 
-罗技和雷蛇的读取代码还没有在真实硬件上验证过。如果你的设备没有显示，请把 `dist\BatteryLevel.exe --dump --hid` 的输出发给开发者。
+罗技和雷蛇的读取代码还没有在真实硬件上验证过。如果你的设备没有显示，请把 `BatteryLevel.exe --dump --hid` 的输出发给开发者。
 
 ## 项目结构
 
 ```
+BatteryLevel.exe    编译产物（随源码提交）
 src/
   BatteryReader.cs  汇总各来源电量；蓝牙部分通过 SetupAPI 读取
   Hid.cs            USB HID 集合枚举、带超时的异步读写通道

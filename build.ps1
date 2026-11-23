@@ -2,13 +2,22 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $src  = Join-Path $root 'src'
-$out  = Join-Path $root 'dist'
+$out  = $root   # 产物输出到仓库根目录，随源码一起提交
 $ico  = Join-Path $root 'assets\app.ico'
 $csc  = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
 if (-not (Test-Path $csc)) { throw '未找到 .NET Framework 4.x 编译器 csc.exe' }
 
-New-Item -ItemType Directory -Force $out, (Split-Path $ico) | Out-Null
+New-Item -ItemType Directory -Force (Split-Path $ico) | Out-Null
+
+# 正在运行的 exe 会被系统锁定，无法覆盖，先关闭它
+$exe = Join-Path $out 'BatteryLevel.exe'
+$running = Get-Process BatteryLevel -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }
+if ($running) {
+    Write-Host '检测到 BatteryLevel 正在运行，先将其关闭…'
+    $running | Stop-Process -Force
+    $running | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+}
 
 # 生成应用图标（PNG 压缩的多尺寸 ICO）
 if (-not (Test-Path $ico)) {
